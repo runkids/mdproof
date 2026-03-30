@@ -108,13 +108,28 @@ func splitSnapshotExpected(expected []core.Expectation) (regular []core.Expectat
 
 // SessionOptions controls session execution behavior.
 type SessionOptions struct {
-	Timeout      time.Duration
-	FailFast     bool
-	EnvVars      map[string]string
-	SnapStore    *snapshot.Store
-	RunbookName  string
-	StepSetup    string // command to run before each step (empty = disabled)
-	StepTeardown string // command to run after each step (empty = disabled)
+	Timeout             time.Duration
+	FailFast            bool
+	EnvVars             map[string]string
+	SnapStore           *snapshot.Store
+	RunbookName         string
+	StepSetup           string // command to run before each step (empty = disabled)
+	StepTeardown        string // command to run after each step (empty = disabled)
+	KeepFailedArtifacts bool
+}
+
+// SessionRun carries the parsed results plus the temp artifact dir lifecycle.
+type SessionRun struct {
+	Results     []core.StepResult
+	ArtifactDir string
+	Cleanup     func()
+}
+
+type executionArtifacts struct {
+	ScriptPath string
+	EnvPath    string
+	StdoutPath string
+	StderrPath string
 }
 
 // ExecuteSession runs all auto steps in a single bash session, preserving
@@ -122,6 +137,17 @@ type SessionOptions struct {
 // with pipefail; an EXIT trap saves exported variables for the next step.
 // The step's exit code is the exit code of the last command in the subshell.
 func ExecuteSession(ctx context.Context, steps []core.Step, opts SessionOptions) []core.StepResult {
+	run := ExecuteSessionDetailed(ctx, steps, opts)
+	keep := opts.KeepFailedArtifacts && sessionHasFailure(run.Results)
+	if !keep && run.Cleanup != nil {
+		run.Cleanup()
+	}
+	return run.Results
+}
+
+// ExecuteSessionDetailed returns step results plus the temp artifact dir so
+// callers can print or retain failure diagnostics before cleanup.
+func ExecuteSessionDetailed(ctx context.Context, steps []core.Step, opts SessionOptions) SessionRun {
 	if opts.Timeout == 0 {
 		opts.Timeout = core.DefaultSessionTimeout
 	}
@@ -133,7 +159,7 @@ func ExecuteSession(ctx context.Context, steps []core.Step, opts SessionOptions)
 		for i, s := range steps {
 			results[i] = newStepResult(s, core.StatusFailed, ErrNotInContainer.Error())
 		}
-		return results
+		return SessionRun{Results: results}
 	}
 
 	// Collect auto steps with their original indices.
@@ -146,7 +172,7 @@ func ExecuteSession(ctx context.Context, steps []core.Step, opts SessionOptions)
 		}
 	}
 	if len(autoSteps) == 0 {
-		return results
+		return SessionRun{Results: results}
 	}
 
 	// Create temp dir for stderr files and env persistence.
@@ -155,9 +181,16 @@ func ExecuteSession(ctx context.Context, steps []core.Step, opts SessionOptions)
 		for _, as := range autoSteps {
 			results[as.idx] = newStepResult(as.step, core.StatusFailed, fmt.Sprintf("create temp dir: %v", err))
 		}
-		return results
+		return SessionRun{Results: results}
 	}
-	defer os.RemoveAll(tmpDir)
+
+	if err := writeArtifactScripts(autoSteps, tmpDir, opts); err != nil {
+		for _, as := range autoSteps {
+			results[as.idx] = newStepResult(as.step, core.StatusFailed, fmt.Sprintf("write artifact scripts: %v", err))
+		}
+		_ = os.RemoveAll(tmpDir)
+		return SessionRun{Results: results}
+	}
 
 	script := buildSessionScript(autoSteps, tmpDir, opts)
 
@@ -166,7 +199,8 @@ func ExecuteSession(ctx context.Context, steps []core.Step, opts SessionOptions)
 		for _, as := range autoSteps {
 			results[as.idx] = newStepResult(as.step, core.StatusFailed, fmt.Sprintf("write script: %v", err))
 		}
-		return results
+		_ = os.RemoveAll(tmpDir)
+		return SessionRun{Results: results}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
@@ -220,7 +254,200 @@ func ExecuteSession(ctx context.Context, steps []core.Step, opts SessionOptions)
 		}
 	}
 
-	return results
+	populateDebugMetadata(results, autoSteps, tmpDir)
+
+	return SessionRun{
+		Results:     results,
+		ArtifactDir: tmpDir,
+		Cleanup: func() {
+			_ = os.RemoveAll(tmpDir)
+		},
+	}
+}
+
+func sessionHasFailure(results []core.StepResult) bool {
+	for _, r := range results {
+		if r.Status == core.StatusFailed {
+			return true
+		}
+	}
+	return false
+}
+
+func splitStepSubCommands(command string) []string {
+	parts := strings.Split(command, "\n---\n")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	return filtered
+}
+
+func stepArtifacts(tmpDir string, stepNum int) executionArtifacts {
+	base := filepath.Join(tmpDir, fmt.Sprintf("step_%d", stepNum))
+	return executionArtifacts{
+		ScriptPath: base + ".sh",
+		EnvPath:    base + "_env",
+		StdoutPath: base + "_out",
+		StderrPath: base + "_err",
+	}
+}
+
+func hookArtifacts(tmpDir string, stepNum int, hook string) executionArtifacts {
+	base := filepath.Join(tmpDir, fmt.Sprintf("step_%d_%s", stepNum, hook))
+	return executionArtifacts{
+		ScriptPath: base + ".sh",
+		EnvPath:    base + "_env",
+		StdoutPath: base + "_out",
+		StderrPath: base + "_err",
+	}
+}
+
+func subArtifacts(tmpDir string, stepNum, subIdx int) executionArtifacts {
+	base := filepath.Join(tmpDir, fmt.Sprintf("step_%d_sub_%d", stepNum, subIdx))
+	return executionArtifacts{
+		ScriptPath: base + ".sh",
+		EnvPath:    base + "_env",
+		StdoutPath: base + "_out",
+		StderrPath: base + "_err",
+	}
+}
+
+func renderStepScript(command string) string {
+	parts := splitStepSubCommands(command)
+	if len(parts) <= 1 {
+		if strings.HasSuffix(command, "\n") {
+			return command
+		}
+		return command + "\n"
+	}
+
+	var sb strings.Builder
+	for i, part := range parts {
+		if i > 0 {
+			sb.WriteString("\n# --- mdproof sub-command ---\n")
+		}
+		sb.WriteString(part)
+		if !strings.HasSuffix(part, "\n") {
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
+func writeArtifactScript(path, content string) error {
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return os.WriteFile(path, []byte(content), 0700)
+}
+
+func writeArtifactScripts(autoSteps []indexedStep, tmpDir string, opts SessionOptions) error {
+	for _, as := range autoSteps {
+		if err := writeArtifactScript(stepArtifacts(tmpDir, as.step.Number).ScriptPath, renderStepScript(as.step.Command)); err != nil {
+			return err
+		}
+		if opts.StepSetup != "" {
+			if err := writeArtifactScript(hookArtifacts(tmpDir, as.step.Number, "setup").ScriptPath, opts.StepSetup); err != nil {
+				return err
+			}
+		}
+		if opts.StepTeardown != "" {
+			if err := writeArtifactScript(hookArtifacts(tmpDir, as.step.Number, "teardown").ScriptPath, opts.StepTeardown); err != nil {
+				return err
+			}
+		}
+		for i, sub := range splitStepSubCommands(as.step.Command) {
+			if len(splitStepSubCommands(as.step.Command)) <= 1 {
+				break
+			}
+			if err := writeArtifactScript(subArtifacts(tmpDir, as.step.Number, i).ScriptPath, sub); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func readDebugEnvironment(path string) *core.DebugEnvironment {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	env := &core.DebugEnvironment{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "PWD":
+			env.PWD = val
+		case "HOME":
+			env.HOME = val
+		case "TMPDIR":
+			env.TMPDIR = val
+		}
+	}
+	if env.PWD == "" && env.HOME == "" && env.TMPDIR == "" {
+		return nil
+	}
+	return env
+}
+
+func newStepDebug(art executionArtifacts) *core.StepDebug {
+	return &core.StepDebug{
+		ScriptPath:  art.ScriptPath,
+		EnvPath:     art.EnvPath,
+		StdoutPath:  art.StdoutPath,
+		StderrPath:  art.StderrPath,
+		Environment: readDebugEnvironment(art.EnvPath),
+	}
+}
+
+func hasFailingAssertion(r core.StepResult) bool {
+	for _, a := range r.Assertions {
+		if !a.Matched {
+			return true
+		}
+	}
+	return false
+}
+
+func firstFailingSubCommand(r core.StepResult) int {
+	for i, sc := range r.SubCommands {
+		if sc.ExitCode != 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+func populateDebugMetadata(results []core.StepResult, autoSteps []indexedStep, tmpDir string) {
+	for _, as := range autoSteps {
+		r := &results[as.idx]
+		if r.StepSetup != nil && r.StepSetup.ExitCode != 0 {
+			r.Debug = newStepDebug(hookArtifacts(tmpDir, as.step.Number, "setup"))
+			continue
+		}
+		if r.Status != core.StatusFailed {
+			continue
+		}
+		if r.ExitCode == 0 && hasFailingAssertion(*r) {
+			r.Debug = newStepDebug(stepArtifacts(tmpDir, as.step.Number))
+			continue
+		}
+		if subIdx := firstFailingSubCommand(*r); subIdx >= 0 {
+			r.Debug = newStepDebug(subArtifacts(tmpDir, as.step.Number, subIdx))
+			continue
+		}
+		if r.ExitCode != 0 {
+			r.Debug = newStepDebug(stepArtifacts(tmpDir, as.step.Number))
+		}
+	}
 }
 
 // buildSessionScript generates a single bash script that executes all steps
@@ -254,6 +481,10 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 	sb.WriteString("  fi\n")
 	sb.WriteString("}\n\n")
 
+	sb.WriteString("__rb_capture_env() {\n")
+	sb.WriteString("  printf 'PWD=%s\\nHOME=%s\\nTMPDIR=%s\\n' \"$PWD\" \"$HOME\" \"$TMPDIR\"\n")
+	sb.WriteString("}\n\n")
+
 	if opts.FailFast {
 		sb.WriteString("__rb_stop=0\n\n")
 	}
@@ -262,14 +493,7 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 		n := as.step.Number
 
 		command := as.step.Command
-		subCommands := strings.Split(command, "\n---\n")
-		var filtered []string
-		for _, sc := range subCommands {
-			sc = strings.TrimSpace(sc)
-			if sc != "" {
-				filtered = append(filtered, sc)
-			}
-		}
+		filtered := splitStepSubCommands(command)
 		isMultiSub := len(filtered) > 1
 
 		fmt.Fprintf(&sb, "# Step %d: %s\n", n, as.step.Title)
@@ -299,10 +523,9 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 
 			// Setup inside retry loop.
 			if hasSetup {
-				outFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_setup_out", n))
-				errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_setup_err", n))
-				fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  %s\n) >%q 2>%q\n",
-					envFile, envFile, opts.StepSetup, outFile, errFile)
+				art := hookArtifacts(tmpDir, n, "setup")
+				fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  __rb_capture_env > %q\n  %s\n) >%q 2>%q\n",
+					envFile, envFile, art.EnvPath, opts.StepSetup, art.StdoutPath, art.StderrPath)
 				sb.WriteString("__rb_setup_rc=$?\n")
 				fmt.Fprintf(&sb, "echo \"@@RB:STEP_SETUP:%d:${__rb_setup_rc}@@\"\n", n)
 				sb.WriteString("if [ $__rb_setup_rc -ne 0 ]; then\n")
@@ -315,10 +538,10 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 				sb.WriteString(buildSubCommandSubshells(as.step, filtered, envFile, tmpDir, opts.FailFast))
 			} else {
 				singleCmd := strings.ReplaceAll(command, "\n---\n", "\n")
-				errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_err", n))
-				subshell := buildStepSubshell(as.step, singleCmd, envFile, errFile)
+				subshell := buildStepSubshell(as.step, singleCmd, envFile, stepArtifacts(tmpDir, n))
 				sb.WriteString(subshell)
 				sb.WriteString("__rb_rc=$?\n")
+				fmt.Fprintf(&sb, "cat %q\n", stepArtifacts(tmpDir, n).StdoutPath)
 			}
 
 			if hasSetup {
@@ -327,10 +550,9 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 
 			// Teardown inside retry loop.
 			if hasTeardown {
-				outFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_teardown_out", n))
-				errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_teardown_err", n))
-				fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  %s\n) >%q 2>%q\n",
-					envFile, envFile, opts.StepTeardown, outFile, errFile)
+				art := hookArtifacts(tmpDir, n, "teardown")
+				fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  __rb_capture_env > %q\n  %s\n) >%q 2>%q\n",
+					envFile, envFile, art.EnvPath, opts.StepTeardown, art.StdoutPath, art.StderrPath)
 				sb.WriteString("__rb_teardown_rc=$?\n")
 				fmt.Fprintf(&sb, "echo \"@@RB:STEP_TEARDOWN:%d:${__rb_teardown_rc}@@\"\n", n)
 			}
@@ -350,10 +572,9 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 
 			// Step-setup: runs before step body, captures output to temp files.
 			if hasSetup {
-				outFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_setup_out", n))
-				errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_setup_err", n))
-				fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  %s\n) >%q 2>%q\n",
-					envFile, envFile, opts.StepSetup, outFile, errFile)
+				art := hookArtifacts(tmpDir, n, "setup")
+				fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  __rb_capture_env > %q\n  %s\n) >%q 2>%q\n",
+					envFile, envFile, art.EnvPath, opts.StepSetup, art.StdoutPath, art.StderrPath)
 				sb.WriteString("__rb_setup_rc=$?\n")
 				fmt.Fprintf(&sb, "echo \"@@RB:STEP_SETUP:%d:${__rb_setup_rc}@@\"\n", n)
 				sb.WriteString("if [ $__rb_setup_rc -ne 0 ]; then\n")
@@ -389,8 +610,8 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 				// Single command: use existing subshell (no behavior change).
 				singleCmd := command
 				singleCmd = strings.ReplaceAll(singleCmd, "\n---\n", "\n")
-				errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_err", n))
-				subshell := buildStepSubshell(as.step, singleCmd, envFile, errFile)
+				art := stepArtifacts(tmpDir, n)
+				subshell := buildStepSubshell(as.step, singleCmd, envFile, art)
 
 				// retry directive: wrap subshell in a for loop.
 				if hasRetry {
@@ -398,6 +619,7 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 					fmt.Fprintf(&sb, "for __rb_attempt in $(seq 1 %d); do\n", attempts)
 					sb.WriteString(subshell)
 					sb.WriteString("__rb_rc=$?\n")
+					fmt.Fprintf(&sb, "cat %q\n", art.StdoutPath)
 					sb.WriteString("[ $__rb_rc -eq 0 ] && break\n")
 					if as.step.RetryDelay > 0 {
 						fmt.Fprintf(&sb, "[ $__rb_attempt -lt %d ] && sleep %d\n", attempts, int(as.step.RetryDelay.Seconds()))
@@ -406,6 +628,7 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 				} else {
 					sb.WriteString(subshell)
 					sb.WriteString("__rb_rc=$?\n")
+					fmt.Fprintf(&sb, "cat %q\n", art.StdoutPath)
 				}
 			}
 
@@ -447,10 +670,9 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 				// Only run teardown if this step was not skipped by fail-fast.
 				fmt.Fprintf(&sb, "if [ \"${__rb_status_%d+set}\" = \"set\" ]; then\n", n)
 			}
-			outFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_teardown_out", n))
-			errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_teardown_err", n))
-			fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  %s\n) >%q 2>%q\n",
-				envFile, envFile, opts.StepTeardown, outFile, errFile)
+			art := hookArtifacts(tmpDir, n, "teardown")
+			fmt.Fprintf(&sb, "(\n  set -o pipefail\n  [ -f %q ] && source %q\n  __rb_capture_env > %q\n  %s\n) >%q 2>%q\n",
+				envFile, envFile, art.EnvPath, opts.StepTeardown, art.StdoutPath, art.StderrPath)
 			sb.WriteString("__rb_teardown_rc=$?\n")
 			fmt.Fprintf(&sb, "echo \"@@RB:STEP_TEARDOWN:%d:${__rb_teardown_rc}@@\"\n", n)
 			if opts.FailFast {
@@ -466,11 +688,12 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 
 // buildStepSubshell generates the subshell block for a single step.
 // Returns the subshell string WITHOUT the trailing `__rb_rc=$?`.
-func buildStepSubshell(step core.Step, command, envFile, errFile string) string {
+func buildStepSubshell(step core.Step, command, envFile string, art executionArtifacts) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "(\n")
 	fmt.Fprintf(&sb, "  set -o pipefail -a\n")
 	fmt.Fprintf(&sb, "  [ -f %q ] && source %q\n", envFile, envFile)
+	fmt.Fprintf(&sb, "  __rb_capture_env > %q\n", art.EnvPath)
 	fmt.Fprintf(&sb, "  __rb_save_env() { export -p > %q 2>/dev/null; }\n", envFile)
 	fmt.Fprintf(&sb, "  trap __rb_save_env EXIT\n")
 
@@ -486,7 +709,7 @@ func buildStepSubshell(step core.Step, command, envFile, errFile string) string 
 		fmt.Fprintf(&sb, "  %s\n", command)
 	}
 
-	fmt.Fprintf(&sb, ") 2>%q\n", errFile)
+	fmt.Fprintf(&sb, ") >%q 2>%q\n", art.StdoutPath, art.StderrPath)
 	return sb.String()
 }
 
@@ -497,7 +720,7 @@ func buildSubCommandSubshells(step core.Step, subCommands []string, envFile, tmp
 	var sb strings.Builder
 	sb.WriteString("__rb_rc=0\n")
 	for i, sub := range subCommands {
-		errFile := filepath.Join(tmpDir, fmt.Sprintf("step_%d_sub_%d_err", step.Number, i))
+		art := subArtifacts(tmpDir, step.Number, i)
 		if failFast && i > 0 {
 			sb.WriteString("if [ $__rb_rc -eq 0 ]; then\n")
 		}
@@ -505,11 +728,13 @@ func buildSubCommandSubshells(step core.Step, subCommands []string, envFile, tmp
 		fmt.Fprintf(&sb, "(\n")
 		fmt.Fprintf(&sb, "  set -o pipefail -a\n")
 		fmt.Fprintf(&sb, "  [ -f %q ] && source %q\n", envFile, envFile)
+		fmt.Fprintf(&sb, "  __rb_capture_env > %q\n", art.EnvPath)
 		fmt.Fprintf(&sb, "  __rb_save_env() { export -p > %q 2>/dev/null; }\n", envFile)
 		fmt.Fprintf(&sb, "  trap __rb_save_env EXIT\n")
 		fmt.Fprintf(&sb, "  %s\n", sub)
-		fmt.Fprintf(&sb, ") 2>%q\n", errFile)
+		fmt.Fprintf(&sb, ") >%q 2>%q\n", art.StdoutPath, art.StderrPath)
 		sb.WriteString("__rb_sub_rc=$?\n")
+		fmt.Fprintf(&sb, "cat %q\n", art.StdoutPath)
 		sb.WriteString("[ $__rb_rc -eq 0 ] && __rb_rc=$__rb_sub_rc\n")
 		fmt.Fprintf(&sb, "echo \"@@RB:SUB_END:%d:%d:${__rb_sub_rc}@@\"\n", step.Number, i)
 		if failFast && i > 0 {

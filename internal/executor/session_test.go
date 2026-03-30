@@ -2,7 +2,9 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -556,4 +558,167 @@ func TestExecuteSession_EmptySubCommandFiltered(t *testing.T) {
 	if !strings.Contains(results[0].SubCommands[1].Stdout, "last") {
 		t.Errorf("sub 1: expected 'last', got %q", results[0].SubCommands[1].Stdout)
 	}
+}
+
+func TestExecuteSession_FailedStepArtifactsRetainedWhenRequested(t *testing.T) {
+	steps := []core.Step{
+		{Number: 1, Title: "fail", Command: "echo boom && exit 1", Executor: core.ExecutorAuto},
+	}
+	results := ExecuteSession(context.Background(), steps, SessionOptions{
+		Timeout:             30 * time.Second,
+		KeepFailedArtifacts: true,
+		EnvVars: map[string]string{
+			"HOME":   "/tmp/mdproof-home",
+			"TMPDIR": "/tmp/mdproof-home/tmp",
+		},
+	})
+
+	debug := results[0].Debug
+	if debug == nil {
+		t.Fatal("expected debug metadata for failed step")
+	}
+	for _, path := range []string{debug.ScriptPath, debug.EnvPath, debug.StdoutPath, debug.StderrPath} {
+		if path == "" {
+			t.Fatal("expected all debug paths to be populated")
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected retained artifact %q to exist: %v", path, err)
+		}
+	}
+
+	scriptData, err := os.ReadFile(debug.ScriptPath)
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	if !strings.Contains(string(scriptData), "echo boom && exit 1") {
+		t.Fatalf("script file missing command content:\n%s", string(scriptData))
+	}
+
+	envData, err := os.ReadFile(debug.EnvPath)
+	if err != nil {
+		t.Fatalf("read env snapshot: %v", err)
+	}
+	for _, want := range []string{"PWD=", "HOME=/tmp/mdproof-home", "TMPDIR=/tmp/mdproof-home/tmp"} {
+		if !strings.Contains(string(envData), want) {
+			t.Fatalf("env snapshot missing %q:\n%s", want, string(envData))
+		}
+	}
+
+	stdoutData, err := os.ReadFile(debug.StdoutPath)
+	if err != nil {
+		t.Fatalf("read stdout artifact: %v", err)
+	}
+	if !strings.Contains(string(stdoutData), "boom") {
+		t.Fatalf("stdout artifact missing step output:\n%s", string(stdoutData))
+	}
+
+	if debug.Environment == nil {
+		t.Fatal("expected inline debug environment")
+	}
+	if debug.Environment.HOME != "/tmp/mdproof-home" {
+		t.Fatalf("debug HOME = %q, want %q", debug.Environment.HOME, "/tmp/mdproof-home")
+	}
+
+	_ = os.RemoveAll(filepath.Dir(debug.ScriptPath))
+}
+
+func TestExecuteSession_FailedStepArtifactsRemovedWithoutKeep(t *testing.T) {
+	steps := []core.Step{
+		{Number: 1, Title: "fail", Command: "echo boom && exit 1", Executor: core.ExecutorAuto},
+	}
+	results := ExecuteSession(context.Background(), steps, SessionOptions{Timeout: 30 * time.Second})
+
+	debug := results[0].Debug
+	if debug == nil {
+		t.Fatal("expected debug metadata for failed step")
+	}
+	if _, err := os.Stat(debug.ScriptPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected script artifact to be cleaned up, got err=%v", err)
+	}
+}
+
+func TestExecuteSession_SubcommandFailureDebugTargetsFirstFailingSubcommand(t *testing.T) {
+	steps := []core.Step{
+		{Number: 1, Title: "subcmd fail", Command: "echo first\n---\necho second && exit 3\n---\necho third", Executor: core.ExecutorAuto},
+	}
+	results := ExecuteSession(context.Background(), steps, SessionOptions{
+		Timeout:             30 * time.Second,
+		KeepFailedArtifacts: true,
+	})
+
+	debug := results[0].Debug
+	if debug == nil {
+		t.Fatal("expected debug metadata for failed subcommand step")
+	}
+	if !strings.HasSuffix(debug.ScriptPath, "step_1_sub_1.sh") {
+		t.Fatalf("expected failing subcommand script, got %q", debug.ScriptPath)
+	}
+	stdoutData, err := os.ReadFile(debug.StdoutPath)
+	if err != nil {
+		t.Fatalf("read subcommand stdout: %v", err)
+	}
+	if strings.TrimSpace(string(stdoutData)) != "second" {
+		t.Fatalf("expected failing subcommand stdout, got %q", string(stdoutData))
+	}
+
+	_ = os.RemoveAll(filepath.Dir(debug.ScriptPath))
+}
+
+func TestExecuteSession_AssertionFailureDebugTargetsMainStepArtifacts(t *testing.T) {
+	steps := []core.Step{{
+		Number:   1,
+		Title:    "assert fail",
+		Command:  "echo apple",
+		Expected: core.Expectations("banana"),
+		Executor: core.ExecutorAuto,
+	}}
+	results := ExecuteSession(context.Background(), steps, SessionOptions{
+		Timeout:             30 * time.Second,
+		KeepFailedArtifacts: true,
+	})
+
+	debug := results[0].Debug
+	if debug == nil {
+		t.Fatal("expected debug metadata for assertion failure")
+	}
+	if !strings.HasSuffix(debug.ScriptPath, "step_1.sh") {
+		t.Fatalf("expected main step script path, got %q", debug.ScriptPath)
+	}
+	stdoutData, err := os.ReadFile(debug.StdoutPath)
+	if err != nil {
+		t.Fatalf("read stdout artifact: %v", err)
+	}
+	if strings.TrimSpace(string(stdoutData)) != "apple" {
+		t.Fatalf("stdout artifact = %q, want %q", string(stdoutData), "apple")
+	}
+
+	_ = os.RemoveAll(filepath.Dir(debug.ScriptPath))
+}
+
+func TestExecuteSession_StepSetupFailureDebugTargetsSetupArtifacts(t *testing.T) {
+	steps := []core.Step{
+		{Number: 1, Title: "setup fail", Command: "echo should-not-run", Executor: core.ExecutorAuto},
+	}
+	results := ExecuteSession(context.Background(), steps, SessionOptions{
+		Timeout:             30 * time.Second,
+		KeepFailedArtifacts: true,
+		StepSetup:           "echo setup-boom && exit 4",
+	})
+
+	debug := results[0].Debug
+	if debug == nil {
+		t.Fatal("expected debug metadata for setup failure")
+	}
+	if !strings.HasSuffix(debug.ScriptPath, "step_1_setup.sh") {
+		t.Fatalf("expected setup script path, got %q", debug.ScriptPath)
+	}
+	stdoutData, err := os.ReadFile(debug.StdoutPath)
+	if err != nil {
+		t.Fatalf("read setup stdout artifact: %v", err)
+	}
+	if strings.TrimSpace(string(stdoutData)) != "setup-boom" {
+		t.Fatalf("setup stdout artifact = %q, want %q", string(stdoutData), "setup-boom")
+	}
+
+	_ = os.RemoveAll(filepath.Dir(debug.ScriptPath))
 }

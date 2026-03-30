@@ -94,6 +94,27 @@ func WriteSingleReport(w io.Writer, r core.Report, verbosity int) {
 		}
 	}
 
+	if failed := firstFailedStepWithDebug(r); failed != nil {
+		if r.ArtifactDir != "" {
+			fmt.Fprintf(w, "          artifact dir: %s\n", r.ArtifactDir)
+			if r.IsolationDir != "" {
+				fmt.Fprintf(w, "          isolation dir: %s\n", r.IsolationDir)
+			}
+			fmt.Fprintf(w, "          failed step: Step %d %s\n", failed.Step.Number, failed.Step.Title)
+			fmt.Fprintf(w, "          script path: %s\n", failed.Debug.ScriptPath)
+			fmt.Fprintf(w, "          env path: %s\n", failed.Debug.EnvPath)
+			fmt.Fprintf(w, "          stdout path: %s\n", failed.Debug.StdoutPath)
+			fmt.Fprintf(w, "          stderr path: %s\n", failed.Debug.StderrPath)
+			if failed.Debug.Environment != nil {
+				fmt.Fprintf(w, "          PWD=%s\n", failed.Debug.Environment.PWD)
+				fmt.Fprintf(w, "          HOME=%s\n", failed.Debug.Environment.HOME)
+				fmt.Fprintf(w, "          TMPDIR=%s\n", failed.Debug.Environment.TMPDIR)
+			}
+		} else {
+			fmt.Fprintf(w, "          rerun with --keep-failed-artifacts to preserve file paths\n")
+		}
+	}
+
 	// Show teardown status if present.
 	if status, ok := r.Hooks["teardown"]; ok {
 		hIcon := plainStatusIcon(status)
@@ -225,4 +246,13 @@ func plainStatusIcon(status string) string {
 	default:
 		return "\u25CF"
 	}
+}
+
+func firstFailedStepWithDebug(r core.Report) *core.StepResult {
+	for i := range r.Steps {
+		if r.Steps[i].Status == core.StatusFailed && r.Steps[i].Debug != nil {
+			return &r.Steps[i]
+		}
+	}
+	return nil
 }

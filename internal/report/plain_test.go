@@ -209,3 +209,78 @@ func TestWriteSingleReport_CommandFailureShowsCodeBlockRange(t *testing.T) {
 		t.Fatalf("plain report missing command source range:\n%s", out)
 	}
 }
+
+func TestWriteSingleReport_FailedStepShowsDebugBlockWhenArtifactsRetained(t *testing.T) {
+	report := core.Report{
+		Runbook:      "debug-proof.md",
+		ArtifactDir:  "/tmp/mdproof-session-123",
+		IsolationDir: "/tmp/mdproof-iso-456",
+		Summary:      core.Summary{Total: 1, Failed: 1},
+		Steps: []core.StepResult{{
+			Step:     core.Step{Number: 2, Title: "Broken step"},
+			Status:   core.StatusFailed,
+			ExitCode: 1,
+			Debug: &core.StepDebug{
+				ScriptPath: "/tmp/mdproof-session-123/step_2.sh",
+				EnvPath:    "/tmp/mdproof-session-123/step_2_env",
+				StdoutPath: "/tmp/mdproof-session-123/step_2_out",
+				StderrPath: "/tmp/mdproof-session-123/step_2_err",
+				Environment: &core.DebugEnvironment{
+					PWD:    "/workspace",
+					HOME:   "/tmp/mdproof-iso-456",
+					TMPDIR: "/tmp/mdproof-iso-456/tmp",
+				},
+			},
+		}},
+	}
+
+	var buf bytes.Buffer
+	WriteSingleReport(&buf, report, 0)
+
+	out := buf.String()
+	for _, want := range []string{
+		"artifact dir: /tmp/mdproof-session-123",
+		"isolation dir: /tmp/mdproof-iso-456",
+		"failed step: Step 2 Broken step",
+		"script path: /tmp/mdproof-session-123/step_2.sh",
+		"env path: /tmp/mdproof-session-123/step_2_env",
+		"stdout path: /tmp/mdproof-session-123/step_2_out",
+		"stderr path: /tmp/mdproof-session-123/step_2_err",
+		"PWD=/workspace",
+		"HOME=/tmp/mdproof-iso-456",
+		"TMPDIR=/tmp/mdproof-iso-456/tmp",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plain report missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestWriteSingleReport_FailedStepWithoutRetainedArtifactsShowsRerunHint(t *testing.T) {
+	report := core.Report{
+		Runbook: "debug-proof.md",
+		Summary: core.Summary{Total: 1, Failed: 1},
+		Steps: []core.StepResult{{
+			Step:     core.Step{Number: 1, Title: "Broken step"},
+			Status:   core.StatusFailed,
+			ExitCode: 1,
+			Debug: &core.StepDebug{
+				ScriptPath: "/tmp/mdproof-session-123/step_1.sh",
+				EnvPath:    "/tmp/mdproof-session-123/step_1_env",
+				StdoutPath: "/tmp/mdproof-session-123/step_1_out",
+				StderrPath: "/tmp/mdproof-session-123/step_1_err",
+			},
+		}},
+	}
+
+	var buf bytes.Buffer
+	WriteSingleReport(&buf, report, 0)
+
+	out := buf.String()
+	if !strings.Contains(out, "rerun with --keep-failed-artifacts") {
+		t.Fatalf("plain report missing rerun hint:\n%s", out)
+	}
+	if strings.Contains(out, "script path: /tmp/mdproof-session-123/step_1.sh") {
+		t.Fatalf("plain report should not advertise ephemeral artifact paths:\n%s", out)
+	}
+}

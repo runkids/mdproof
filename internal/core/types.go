@@ -94,6 +94,23 @@ type HookExecResult struct {
 	Stderr   string `json:"stderr,omitempty"`
 }
 
+// DebugEnvironment captures the key execution context for a step or hook.
+type DebugEnvironment struct {
+	PWD    string `json:"pwd,omitempty"`
+	HOME   string `json:"home,omitempty"`
+	TMPDIR string `json:"tmpdir,omitempty"`
+}
+
+// StepDebug describes the shell artifacts for the execution unit that matters
+// most for debugging a step failure.
+type StepDebug struct {
+	ScriptPath  string            `json:"script_path,omitempty"`
+	EnvPath     string            `json:"env_path,omitempty"`
+	StdoutPath  string            `json:"stdout_path,omitempty"`
+	StderrPath  string            `json:"stderr_path,omitempty"`
+	Environment *DebugEnvironment `json:"environment,omitempty"`
+}
+
 // SubCommandResult holds the outcome of a single sub-command within a step.
 type SubCommandResult struct {
 	Command  string `json:"command"`
@@ -116,6 +133,7 @@ type StepResult struct {
 	StepSetup    *HookExecResult    `json:"step_setup,omitempty"`
 	StepTeardown *HookExecResult    `json:"step_teardown,omitempty"`
 	SubCommands  []SubCommandResult `json:"sub_commands,omitempty"`
+	Debug        *StepDebug         `json:"debug,omitempty"`
 }
 
 // AssertionResult represents the result of a single assertion check.
@@ -130,13 +148,15 @@ type AssertionResult struct {
 
 // Report represents the full execution report for a runbook.
 type Report struct {
-	Version     string            `json:"version"`
-	Runbook     string            `json:"runbook"`
-	Environment map[string]string `json:"environment,omitempty"`
-	Hooks       map[string]string `json:"hooks,omitempty"` // setup/teardown status
-	DurationMs  int64             `json:"duration_ms"`
-	Summary     Summary           `json:"summary"`
-	Steps       []StepResult      `json:"steps"`
+	Version      string            `json:"version"`
+	Runbook      string            `json:"runbook"`
+	Environment  map[string]string `json:"environment,omitempty"`
+	ArtifactDir  string            `json:"artifact_dir,omitempty"`
+	IsolationDir string            `json:"isolation_dir,omitempty"`
+	Hooks        map[string]string `json:"hooks,omitempty"` // setup/teardown status
+	DurationMs   int64             `json:"duration_ms"`
+	Summary      Summary           `json:"summary"`
+	Steps        []StepResult      `json:"steps"`
 }
 
 // Summary represents execution summary counts.

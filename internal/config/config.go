@@ -31,16 +31,19 @@ type SandboxConfig struct {
 
 // Config holds lifecycle hooks and defaults for runbook execution.
 type Config struct {
-	Build        string            `json:"build,omitempty"`         // command to run once before all runbooks
-	Setup        string            `json:"setup,omitempty"`         // command to run before each runbook
-	Teardown     string            `json:"teardown,omitempty"`      // command to run after each runbook
-	StepSetup    string            `json:"step_setup,omitempty"`    // command to run before each step
-	StepTeardown string            `json:"step_teardown,omitempty"` // command to run after each step
-	Timeout      string            `json:"timeout,omitempty"`       // per-step timeout (e.g., "5m")
-	Env          map[string]string `json:"env,omitempty"`           // environment variables seeded into all steps
-	Strict       *bool             `json:"strict,omitempty"`        // container-only execution (default: true)
-	Sandbox      *SandboxConfig    `json:"sandbox,omitempty"`       // sandbox subcommand settings
-	Isolation    string            `json:"isolation,omitempty"`     // "shared" (default) | "per-runbook"
+	Build               string            `json:"build,omitempty"`                 // command to run once before all runbooks
+	Setup               string            `json:"setup,omitempty"`                 // command to run before each runbook
+	Teardown            string            `json:"teardown,omitempty"`              // command to run after each runbook
+	StepSetup           string            `json:"step_setup,omitempty"`            // command to run before each step
+	StepTeardown        string            `json:"step_teardown,omitempty"`         // command to run after each step
+	KeepFailedArtifacts *bool             `json:"keep_failed_artifacts,omitempty"` // preserve failed artifact dirs
+	PrintStepScript     *bool             `json:"print_step_script,omitempty"`     // print failed step script to stderr
+	PrintStepEnv        *bool             `json:"print_step_env,omitempty"`        // print failed step env snapshot to stderr
+	Timeout             string            `json:"timeout,omitempty"`               // per-step timeout (e.g., "5m")
+	Env                 map[string]string `json:"env,omitempty"`                   // environment variables seeded into all steps
+	Strict              *bool             `json:"strict,omitempty"`                // container-only execution (default: true)
+	Sandbox             *SandboxConfig    `json:"sandbox,omitempty"`               // sandbox subcommand settings
+	Isolation           string            `json:"isolation,omitempty"`             // "shared" (default) | "per-runbook"
 }
 
 // TimeoutDuration parses the timeout string into a time.Duration.
@@ -81,7 +84,20 @@ func Load(dir string) (Config, error) {
 // Merge applies CLI flag overrides on top of file-based config.
 // CLI flags take precedence when non-empty. strictExplicit indicates
 // whether --strict was explicitly passed on the command line.
-func Merge(file Config, cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown string, cliTimeout time.Duration, cliStrict bool, strictExplicit bool, cliIsolation string) Config {
+func Merge(
+	file Config,
+	cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown string,
+	cliTimeout time.Duration,
+	cliStrict bool,
+	strictExplicit bool,
+	cliIsolation string,
+	cliKeepFailedArtifacts bool,
+	keepFailedArtifactsExplicit bool,
+	cliPrintStepScript bool,
+	printStepScriptExplicit bool,
+	cliPrintStepEnv bool,
+	printStepEnvExplicit bool,
+) Config {
 	merged := file
 	if cliBuild != "" {
 		merged.Build = cliBuild
@@ -107,6 +123,15 @@ func Merge(file Config, cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTe
 	if cliIsolation != "" {
 		merged.Isolation = cliIsolation
 	}
+	if keepFailedArtifactsExplicit {
+		merged.KeepFailedArtifacts = boolPtr(cliKeepFailedArtifacts)
+	}
+	if printStepScriptExplicit {
+		merged.PrintStepScript = boolPtr(cliPrintStepScript)
+	}
+	if printStepEnvExplicit {
+		merged.PrintStepEnv = boolPtr(cliPrintStepEnv)
+	}
 	return merged
 }
 
@@ -117,4 +142,23 @@ func (c Config) IsStrict() bool {
 		return true
 	}
 	return *c.Strict
+}
+
+// KeepFailedArtifactsEnabled returns the effective keep-failed-artifacts value.
+func (c Config) KeepFailedArtifactsEnabled() bool {
+	return c.KeepFailedArtifacts != nil && *c.KeepFailedArtifacts
+}
+
+// PrintStepScriptEnabled returns the effective print-step-script value.
+func (c Config) PrintStepScriptEnabled() bool {
+	return c.PrintStepScript != nil && *c.PrintStepScript
+}
+
+// PrintStepEnvEnabled returns the effective print-step-env value.
+func (c Config) PrintStepEnvEnabled() bool {
+	return c.PrintStepEnv != nil && *c.PrintStepEnv
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

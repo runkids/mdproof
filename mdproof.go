@@ -28,6 +28,8 @@ type (
 	Runbook          = core.Runbook
 	SubCommandResult = core.SubCommandResult
 	HookExecResult   = core.HookExecResult
+	DebugEnvironment = core.DebugEnvironment
+	StepDebug        = core.StepDebug
 	SourcePos        = core.SourcePos
 	SourceRange      = core.SourceRange
 	StepSource       = core.StepSource
@@ -138,8 +140,34 @@ func LoadConfig(dir string) (Config, error) {
 
 // MergeConfig applies CLI flag overrides on top of file-based config.
 // strictExplicit indicates whether --strict was explicitly passed on the CLI.
-func MergeConfig(file Config, cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown string, cliTimeout time.Duration, cliStrict bool, strictExplicit bool, cliIsolation string) Config {
-	return config.Merge(file, cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown, cliTimeout, cliStrict, strictExplicit, cliIsolation)
+func MergeConfig(
+	file Config,
+	cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown string,
+	cliTimeout time.Duration,
+	cliStrict bool,
+	strictExplicit bool,
+	cliIsolation string,
+	cliKeepFailedArtifacts bool,
+	keepFailedArtifactsExplicit bool,
+	cliPrintStepScript bool,
+	printStepScriptExplicit bool,
+	cliPrintStepEnv bool,
+	printStepEnvExplicit bool,
+) Config {
+	return config.Merge(
+		file,
+		cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown,
+		cliTimeout,
+		cliStrict,
+		strictExplicit,
+		cliIsolation,
+		cliKeepFailedArtifacts,
+		keepFailedArtifactsExplicit,
+		cliPrintStepScript,
+		printStepScriptExplicit,
+		cliPrintStepEnv,
+		printStepEnvExplicit,
+	)
 }
 
 // --- Report ---

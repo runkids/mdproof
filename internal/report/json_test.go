@@ -195,3 +195,57 @@ func TestJSON_IncludesSourceMetadata(t *testing.T) {
 		t.Fatalf("assertion source = %+v, want line 11", raw.Steps[0].Assertions)
 	}
 }
+
+func TestJSON_IncludesFailureObservabilityMetadata(t *testing.T) {
+	report := newTestReport()
+	report.Environment = map[string]string{
+		"PWD":    "/workspace",
+		"HOME":   "/tmp/mdproof-iso-123",
+		"TMPDIR": "/tmp/mdproof-iso-123/tmp",
+	}
+	report.ArtifactDir = "/tmp/mdproof-session-123"
+	report.IsolationDir = "/tmp/mdproof-iso-123"
+	report.Steps[0].Debug = &core.StepDebug{
+		ScriptPath: "/tmp/mdproof-session-123/step_1.sh",
+		EnvPath:    "/tmp/mdproof-session-123/step_1_env",
+		StdoutPath: "/tmp/mdproof-session-123/step_1_out",
+		StderrPath: "/tmp/mdproof-session-123/step_1_err",
+		Environment: &core.DebugEnvironment{
+			PWD:    "/workspace",
+			HOME:   "/tmp/mdproof-iso-123",
+			TMPDIR: "/tmp/mdproof-iso-123/tmp",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteJSONReport(&buf, report); err != nil {
+		t.Fatalf("WriteJSONReport: %v", err)
+	}
+
+	var got core.Report
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	if got.ArtifactDir != "/tmp/mdproof-session-123" {
+		t.Fatalf("ArtifactDir = %q, want %q", got.ArtifactDir, "/tmp/mdproof-session-123")
+	}
+	if got.IsolationDir != "/tmp/mdproof-iso-123" {
+		t.Fatalf("IsolationDir = %q, want %q", got.IsolationDir, "/tmp/mdproof-iso-123")
+	}
+	if got.Environment["PWD"] != "/workspace" {
+		t.Fatalf("report environment PWD = %q, want %q", got.Environment["PWD"], "/workspace")
+	}
+	if got.Steps[0].Debug == nil {
+		t.Fatal("step debug missing after JSON round-trip")
+	}
+	if got.Steps[0].Debug.ScriptPath != "/tmp/mdproof-session-123/step_1.sh" {
+		t.Fatalf("Debug.ScriptPath = %q, want %q", got.Steps[0].Debug.ScriptPath, "/tmp/mdproof-session-123/step_1.sh")
+	}
+	if got.Steps[0].Debug.Environment == nil {
+		t.Fatal("step debug environment missing after JSON round-trip")
+	}
+	if got.Steps[0].Debug.Environment.TMPDIR != "/tmp/mdproof-iso-123/tmp" {
+		t.Fatalf("Debug.Environment.TMPDIR = %q, want %q", got.Steps[0].Debug.Environment.TMPDIR, "/tmp/mdproof-iso-123/tmp")
+	}
+}

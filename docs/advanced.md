@@ -109,6 +109,9 @@ Create `mdproof.json` in the runbook directory:
   "teardown": "docker-compose down",
   "step_setup": "rm -rf /tmp/test-state",
   "step_teardown": "echo step done",
+  "keep_failed_artifacts": true,
+  "print_step_script": false,
+  "print_step_env": false,
   "timeout": "5m",
   "strict": false,
   "isolation": "per-runbook",
@@ -126,6 +129,9 @@ Create `mdproof.json` in the runbook directory:
 | `teardown` | string | Command to run after each runbook |
 | `step_setup` | string | Command to run before each step |
 | `step_teardown` | string | Command to run after each step |
+| `keep_failed_artifacts` | boolean | Preserve failed artifact dirs by default |
+| `print_step_script` | boolean | Print the failed step script to `stderr` by default |
+| `print_step_env` | boolean | Print the failed step env snapshot to `stderr` by default |
 | `timeout` | string | Default per-step timeout (e.g. `"2m"`, `"30s"`) |
 | `strict` | boolean | Container-only execution (default: `true`) |
 | `isolation` | string | `"shared"` (default) or `"per-runbook"` |
@@ -144,6 +150,18 @@ Sandbox settings can also be configured:
 ```
 
 CLI flags override config file values.
+
+These observability flags can be enabled in `mdproof.json` as repo defaults:
+
+```json
+{
+  "keep_failed_artifacts": true,
+  "print_step_script": false,
+  "print_step_env": false
+}
+```
+
+CLI flags still take precedence, including explicit `--print-step-script=false` style overrides.
 
 ## Per-Runbook Isolation
 
@@ -164,6 +182,55 @@ Or in `mdproof.json`:
 - Invalid values produce an error at config load time
 - CLI `--isolation` overrides the config file value
 
+### Failure Artifacts
+
+When a runbook fails, mdproof can retain the failure artifacts instead of cleaning them immediately:
+
+```bash
+mdproof --keep-failed-artifacts runbooks/fixtures/failing-proof.md
+mdproof --isolation per-runbook --keep-failed-artifacts runbooks/fixtures/failing-proof.md
+```
+
+With `--keep-failed-artifacts`, mdproof preserves:
+
+- the executor session directory (`artifact_dir`)
+- the per-runbook isolation directory (`isolation_dir`) when `--isolation per-runbook` is active
+
+Retention is triggered for:
+
+- any runbook with failed steps
+- runbook-level setup failure
+
+Teardown-only failures remain informational and do not preserve artifacts.
+
+The retained artifact directory includes:
+
+- `session.sh`
+- `step_<n>.sh`
+- `step_<n>_env`
+- `step_<n>_out`
+- `step_<n>_err`
+- `step_<n>_sub_<i>.sh`
+- `step_<n>_setup.sh`
+- `step_<n>_teardown.sh`
+
+Each env snapshot file contains exactly `PWD`, `HOME`, and `TMPDIR`.
+
+### Failed Step Printing
+
+Use these flags to dump the failed execution unit directly to `stderr`:
+
+```bash
+mdproof --print-step-script runbooks/fixtures/failing-proof.md
+mdproof --print-step-env runbooks/fixtures/failing-proof.md
+mdproof --print-step-script --print-step-env --report json runbooks/fixtures/failing-proof.md
+```
+
+- printing targets the failed execution unit only
+- `--print-step-script` and `--print-step-env` do not imply `--keep-failed-artifacts`
+- when artifacts are not retained, mdproof prints a rerun hint for `--keep-failed-artifacts`
+- printing goes to `stderr`, so JSON output on `stdout` remains machine-readable
+
 ## Report Formats
 
 ### JSON
@@ -180,8 +247,26 @@ Each step also includes source metadata:
 
 ```json
 {
+  "environment": {
+    "PWD": "/workspace",
+    "HOME": "/tmp/mdproof-iso-123",
+    "TMPDIR": "/tmp/mdproof-iso-123/tmp"
+  },
+  "artifact_dir": "/tmp/mdproof-session-123",
+  "isolation_dir": "/tmp/mdproof-iso-123",
   "steps": [
     {
+      "debug": {
+        "script_path": "/tmp/mdproof-session-123/step_1.sh",
+        "env_path": "/tmp/mdproof-session-123/step_1_env",
+        "stdout_path": "/tmp/mdproof-session-123/step_1_out",
+        "stderr_path": "/tmp/mdproof-session-123/step_1_err",
+        "environment": {
+          "pwd": "/workspace",
+          "home": "/tmp/mdproof-iso-123",
+          "tmpdir": "/tmp/mdproof-iso-123/tmp"
+        }
+      },
       "source": {
         "heading": { "start": { "line": 5 }, "end": { "line": 5 } },
         "code_blocks": [

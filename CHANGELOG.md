@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.0.7] - 2026-03-31
+
+### New Features
+
+- **Retained failure artifacts** — `--keep-failed-artifacts` now preserves the failed runbook's executor artifact directory, and also keeps the isolated `$HOME` / `$TMPDIR` directory when `--isolation per-runbook` is active. You can enable it from the CLI or set `keep_failed_artifacts` in `mdproof.json`. The plain-text failure summary points directly to the retained script, env, stdout, and stderr paths so you can inspect the exact failed step without re-deriving temp locations.
+  ```bash
+  mdproof --keep-failed-artifacts runbooks/fixtures/failing-proof.md
+  mdproof --isolation per-runbook --keep-failed-artifacts runbooks/fixtures/failing-proof.md
+  ```
+
+- **Failed-step script and env printing** — `--print-step-script` and `--print-step-env` dump the actual failed step script or captured execution environment to `stderr`, which makes debugging wrappers, temp files, and execution context much faster while keeping `--report json` clean on `stdout`. These defaults can also live in `mdproof.json` via `print_step_script` and `print_step_env`.
+  ```bash
+  mdproof --print-step-script --print-step-env runbooks/fixtures/failing-proof.md
+  mdproof --print-step-script --print-step-env --report json runbooks/fixtures/failing-proof.md
+  ```
+  ```bash
+  mdproof --report json runbooks/fixtures/failing-proof.md | jq '.artifact_dir, .steps[0].debug'
+  ```
+
 ## [0.0.6] - 2026-03-13
 
 ### New Features

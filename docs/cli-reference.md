@@ -28,6 +28,9 @@ When given a directory, mdproof finds files matching `*_runbook.md`, `*-runbook.
 | `--coverage` | Show coverage report (no execution) |
 | `--coverage-min N` | Minimum coverage score (exit 1 if below) |
 | `--isolation MODE` | `shared` (default) or `per-runbook` (isolated `$HOME`/`$TMPDIR`) |
+| `--keep-failed-artifacts` | Preserve failed runbook artifact directories for debugging |
+| `--print-step-script` | Print the failed step script to `stderr` |
+| `--print-step-env` | Print the failed step environment snapshot to `stderr` |
 | `-step-setup CMD` | Run command before each step |
 | `-step-teardown CMD` | Run command after each step |
 | `-v` | Show assertion details |
@@ -104,6 +107,12 @@ mdproof -step-setup 'rm -rf /tmp/test-*' -step-teardown 'echo done' deploy-proof
 # Per-runbook isolation (fresh $HOME/$TMPDIR per runbook)
 mdproof --isolation per-runbook ./runbooks/
 
+# Retain failed artifacts and show debug paths
+mdproof --keep-failed-artifacts runbooks/fixtures/failing-proof.md
+
+# Print failed step script and env to stderr while keeping JSON on stdout
+mdproof --print-step-script --print-step-env --report json runbooks/fixtures/failing-proof.md
+
 # Update snapshots after intentional changes
 mdproof -u deploy-proof.md
 
@@ -120,13 +129,25 @@ mdproof --inline README.md
 
 ## Failure Output
 
-When a runbook fails, mdproof includes the Markdown source location when available:
+When a runbook fails, mdproof includes the Markdown source location when available. If you rerun with `--keep-failed-artifacts`, the plain-text summary also shows:
+
+- the retained `artifact dir`
+- the retained `isolation dir` when `--isolation per-runbook` is active
+- the failed step's script/env/stdout/stderr paths
+- inline `PWD`, `HOME`, and `TMPDIR`
+
+`--print-step-script` and `--print-step-env` print the failed step script or env snapshot to `stderr`. This keeps `--report json` valid on `stdout`.
+
+Example:
 
 ```text
 FAIL runbooks/fixtures/source-aware-assert-proof.md:13 Step 1: Assertion failure
 Assertion runbooks/fixtures/source-aware-assert-proof.md:13 expected output
+artifact dir: /tmp/mdproof-session-123
+script path: /tmp/mdproof-session-123/step_1.sh
+env path: /tmp/mdproof-session-123/step_1_env
 Command runbooks/fixtures/source-aware-exit-proof.md:7-10
 runbooks/fixtures/source-aware-broken.md:7: unclosed code fence
 ```
 
-`--report json` includes the same information under `steps[].source` and `steps[].assertions[].source`.
+`--report json` includes the same information under `steps[].source`, `steps[].assertions[].source`, `environment`, `artifact_dir`, `isolation_dir`, and `steps[].debug`.

@@ -209,6 +209,48 @@ Command runbooks/fixtures/source-aware-exit-proof.md:7-10
 runbooks/fixtures/source-aware-broken.md:7: unclosed code fence
 ```
 
+### Failure Observability
+
+For harder failures where source locations are not enough, mdproof can preserve and print the failed execution artifacts:
+
+```bash
+mdproof --keep-failed-artifacts failing-proof.md
+mdproof --print-step-script --print-step-env failing-proof.md
+mdproof --print-step-script --print-step-env --report json failing-proof.md
+```
+
+**Retained artifacts:**
+- `artifact_dir` points to the executor session temp dir
+- `isolation_dir` is also retained when `--isolation per-runbook` is active
+- `steps[].debug` identifies the failed execution unit with:
+  - `script_path`
+  - `env_path`
+  - `stdout_path`
+  - `stderr_path`
+- `steps[].debug.environment` captures `PWD`, `HOME`, and `TMPDIR`
+
+**Targeting behavior:**
+- step-setup failures point at `step_<n>_setup.*`
+- sub-command failures point at the first failing `step_<n>_sub_<i>.*`
+- assertion failures with exit code 0 still point at the main `step_<n>.*` artifacts
+- teardown-only failures are informational and do not trigger artifact retention
+
+**Printing behavior:**
+- `--print-step-script` dumps the failed execution unit's script to `stderr`
+- `--print-step-env` dumps the failed execution unit's env snapshot to `stderr`
+- these flags do not imply keep; if artifacts are not retained, mdproof prints a rerun hint for `--keep-failed-artifacts`
+- because printing goes to `stderr`, `--report json` remains machine-readable on `stdout`
+
+**Config defaults:** these can be enabled in `mdproof.json`:
+
+```json
+{
+  "keep_failed_artifacts": true,
+  "print_step_script": false,
+  "print_step_env": false
+}
+```
+
 ## Configuration File
 
 Create `mdproof.json` in the runbook directory:
@@ -220,6 +262,9 @@ Create `mdproof.json` in the runbook directory:
   "teardown": "docker-compose down",
   "step_setup": "rm -rf /tmp/test-state && mkdir -p /tmp/test-state",
   "step_teardown": "echo step done",
+  "keep_failed_artifacts": true,
+  "print_step_script": false,
+  "print_step_env": false,
   "timeout": "5m",
   "strict": false,
   "isolation": "per-runbook",

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/runkids/mdproof"
+	"github.com/runkids/mdproof/internal/runner"
 	"github.com/runkids/mdproof/internal/sandbox"
 	"github.com/runkids/mdproof/internal/upgrade"
 )
@@ -18,19 +20,22 @@ var version = "dev"
 
 func main() {
 	var (
-		reportFmt       string
-		dryRun          bool
-		showVersion     bool
-		timeout         time.Duration
-		cliBuild        string
-		cliSetup        string
-		cliTeardown     string
-		cliStepSetup    string
-		cliStepTeardown string
-		failFast        bool
-		outputFile      string
-		cliIsolation    string
-		verbose         countFlag
+		reportFmt           string
+		dryRun              bool
+		showVersion         bool
+		timeout             time.Duration
+		cliBuild            string
+		cliSetup            string
+		cliTeardown         string
+		cliStepSetup        string
+		cliStepTeardown     string
+		failFast            bool
+		outputFile          string
+		cliIsolation        string
+		keepFailedArtifacts bool
+		printStepScript     bool
+		printStepEnv        bool
+		verbose             countFlag
 	)
 
 	flag.StringVar(&reportFmt, "report", "", "output format: json, junit")
@@ -45,6 +50,9 @@ func main() {
 	flag.BoolVar(&failFast, "fail-fast", false, "stop after first failed step")
 	flag.StringVar(&outputFile, "output", "", "write report to file")
 	flag.StringVar(&outputFile, "o", "", "write report to file (shorthand)")
+	flag.BoolVar(&keepFailedArtifacts, "keep-failed-artifacts", false, "keep failure artifacts for debugging")
+	flag.BoolVar(&printStepScript, "print-step-script", false, "print the failed step script to stderr")
+	flag.BoolVar(&printStepEnv, "print-step-env", false, "print the failed step environment to stderr")
 	flag.Var(&verbose, "v", "verbosity level (-v or -v -v)")
 
 	var (
@@ -193,12 +201,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 	strictExplicit := false
+	keepFailedArtifactsExplicit := false
+	printStepScriptExplicit := false
+	printStepEnvExplicit := false
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "strict" {
+		switch f.Name {
+		case "strict":
 			strictExplicit = true
+		case "keep-failed-artifacts":
+			keepFailedArtifactsExplicit = true
+		case "print-step-script":
+			printStepScriptExplicit = true
+		case "print-step-env":
+			printStepEnvExplicit = true
 		}
 	})
-	cfg := mdproof.MergeConfig(fileCfg, cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown, timeout, strict, strictExplicit, cliIsolation)
+	cfg := mdproof.MergeConfig(
+		fileCfg,
+		cliBuild, cliSetup, cliTeardown, cliStepSetup, cliStepTeardown,
+		timeout,
+		strict,
+		strictExplicit,
+		cliIsolation,
+		keepFailedArtifacts,
+		keepFailedArtifactsExplicit,
+		printStepScript,
+		printStepScriptExplicit,
+		printStepEnv,
+		printStepEnvExplicit,
+	)
 
 	// Strict mode off → allow local execution.
 	if !cfg.IsStrict() {
@@ -228,14 +259,7 @@ func main() {
 		}
 	}
 
-	reports, errs := runAllAndReport(files, dryRun, effectiveTimeout, cfg, mdproof.RunOptions{
-		Steps:          stepNums,
-		From:           fromFlag,
-		FailFast:       failFast,
-		SnapshotUpdate: updateSnapshots,
-		StepSetup:      cfg.StepSetup,
-		StepTeardown:   cfg.StepTeardown,
-	}, reportFmt, int(verbose), inlineMode)
+	reports, errs := runAllAndReport(files, dryRun, effectiveTimeout, cfg, buildRunOptions(cfg, stepNums, fromFlag, failFast, updateSnapshots), reportFmt, int(verbose), inlineMode)
 	if errs > 0 {
 		exitCode = 1
 	}
@@ -272,28 +296,31 @@ func main() {
 }
 
 // runFile runs a single runbook file with the given options.
-func runFile(path, name string, dryRun bool, timeout time.Duration, cfg mdproof.Config, filter mdproof.RunOptions, updateSnapshots bool, inline bool) (mdproof.Report, error) {
+func runFile(path, name string, dryRun bool, timeout time.Duration, cfg mdproof.Config, filter mdproof.RunOptions, updateSnapshots bool, inline bool) (runner.RunResult, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return mdproof.Report{}, err
+		return runner.RunResult{}, err
 	}
 	defer f.Close()
 
-	return mdproof.Run(f, name, mdproof.RunOptions{
-		DryRun:         dryRun,
-		Timeout:        timeout,
-		SourcePath:     path,
-		Setup:          cfg.Setup,
-		Teardown:       cfg.Teardown,
-		Steps:          filter.Steps,
-		From:           filter.From,
-		FailFast:       filter.FailFast,
-		Env:            cfg.Env,
-		SnapshotUpdate: updateSnapshots,
-		RunbookDir:     filepath.Dir(path),
-		Inline:         inline,
-		StepSetup:      filter.StepSetup,
-		StepTeardown:   filter.StepTeardown,
+	return runner.RunDetailed(f, name, runner.RunOptions{
+		DryRun:              dryRun,
+		Timeout:             timeout,
+		SourcePath:          path,
+		Setup:               cfg.Setup,
+		Teardown:            cfg.Teardown,
+		Steps:               filter.Steps,
+		From:                filter.From,
+		FailFast:            filter.FailFast,
+		Env:                 cfg.Env,
+		SnapshotUpdate:      updateSnapshots,
+		RunbookDir:          filepath.Dir(path),
+		Inline:              inline,
+		StepSetup:           filter.StepSetup,
+		StepTeardown:        filter.StepTeardown,
+		KeepFailedArtifacts: filter.KeepFailedArtifacts,
+		PrintStepScript:     filter.PrintStepScript,
+		PrintStepEnv:        filter.PrintStepEnv,
 	})
 }
 
@@ -321,6 +348,7 @@ func resolveInlineFiles(target string) ([]string, error) {
 
 func runAllAndReport(files []string, dryRun bool, timeout time.Duration, cfg mdproof.Config, filter mdproof.RunOptions, reportFmt string, verbosity int, inline bool) ([]mdproof.Report, int) {
 	var reports []mdproof.Report
+	var cleanups []func()
 	errs := 0
 	for _, file := range files {
 		name := filepath.Base(file)
@@ -352,14 +380,35 @@ func runAllAndReport(files []string, dryRun bool, timeout time.Duration, cfg mdp
 			runCfg.Env["TMPDIR"] = isoTmp
 		}
 
-		rpt, err := runFile(file, name, dryRun, timeout, runCfg, filter, filter.SnapshotUpdate, inline)
-		if isoDir != "" {
-			os.RemoveAll(isoDir)
-		}
+		runResult, err := runFile(file, name, dryRun, timeout, runCfg, filter, filter.SnapshotUpdate, inline)
 		if err != nil {
+			if runResult.Cleanup != nil {
+				runResult.Cleanup()
+			}
+			if isoDir != "" {
+				_ = os.RemoveAll(isoDir)
+			}
 			fmt.Fprintf(os.Stderr, "error running %s: %v\n", file, err)
 			errs++
 			continue
+		}
+		rpt := runResult.Report
+		keepArtifacts := filter.KeepFailedArtifacts && shouldRetainArtifacts(rpt)
+		if keepArtifacts {
+			rpt.ArtifactDir = runResult.ArtifactDir
+			if isoDir != "" {
+				rpt.IsolationDir = isoDir
+			}
+		} else {
+			if runResult.Cleanup != nil {
+				cleanups = append(cleanups, runResult.Cleanup)
+			}
+			if isoDir != "" {
+				isoDirCopy := isoDir
+				cleanups = append(cleanups, func() {
+					_ = os.RemoveAll(isoDirCopy)
+				})
+			}
 		}
 		reports = append(reports, rpt)
 	}
@@ -381,7 +430,78 @@ func runAllAndReport(files []string, dryRun bool, timeout time.Duration, cfg mdp
 			mdproof.WriteSingleReport(os.Stdout, reports[0], verbosity)
 		}
 	}
+
+	if filter.PrintStepScript || filter.PrintStepEnv {
+		printFailureDebug(os.Stderr, reports, filter)
+	}
+	for _, cleanup := range cleanups {
+		cleanup()
+	}
 	return reports, errs
+}
+
+func buildRunOptions(cfg mdproof.Config, stepNums []int, fromFlag int, failFast bool, updateSnapshots bool) mdproof.RunOptions {
+	return mdproof.RunOptions{
+		Steps:               stepNums,
+		From:                fromFlag,
+		FailFast:            failFast,
+		SnapshotUpdate:      updateSnapshots,
+		StepSetup:           cfg.StepSetup,
+		StepTeardown:        cfg.StepTeardown,
+		KeepFailedArtifacts: cfg.KeepFailedArtifactsEnabled(),
+		PrintStepScript:     cfg.PrintStepScriptEnabled(),
+		PrintStepEnv:        cfg.PrintStepEnvEnabled(),
+	}
+}
+
+func shouldRetainArtifacts(r mdproof.Report) bool {
+	if r.Summary.Failed > 0 {
+		return true
+	}
+	return r.Hooks["setup"] == mdproof.StatusFailed
+}
+
+func printFailureDebug(w io.Writer, reports []mdproof.Report, opts mdproof.RunOptions) {
+	for _, rpt := range reports {
+		step, ok := failedStepWithDebug(rpt)
+		if !ok || step.Debug == nil {
+			continue
+		}
+		if opts.PrintStepScript {
+			fmt.Fprintf(w, "failed step script (%s step %d: %s)\n", rpt.Runbook, step.Step.Number, step.Step.Title)
+			printArtifactFile(w, step.Debug.ScriptPath)
+		}
+		if opts.PrintStepEnv {
+			fmt.Fprintf(w, "failed step environment (%s step %d: %s)\n", rpt.Runbook, step.Step.Number, step.Step.Title)
+			printArtifactFile(w, step.Debug.EnvPath)
+		}
+		if rpt.ArtifactDir == "" {
+			fmt.Fprintln(w, "rerun with --keep-failed-artifacts to preserve file paths")
+		}
+	}
+}
+
+func printArtifactFile(w io.Writer, path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(w, "[unavailable: %v]\n", err)
+		return
+	}
+	if _, err := w.Write(data); err != nil {
+		return
+	}
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		fmt.Fprintln(w)
+	}
+}
+
+func failedStepWithDebug(r mdproof.Report) (mdproof.StepResult, bool) {
+	for _, step := range r.Steps {
+		if step.Status == mdproof.StatusFailed && step.Debug != nil {
+			return step, true
+		}
+	}
+	return mdproof.StepResult{}, false
 }
 
 // countFlag implements flag.Value for counting repeated -v flags.

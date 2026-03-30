@@ -112,6 +112,9 @@ mdproof --report junit test-proof.md  # JUnit XML report to stdout
 mdproof --fail-fast ./tests/          # Stop on first failure
 mdproof --steps 1,3 test-proof.md     # Run specific steps
 mdproof --from 3 test-proof.md        # Run from step 3 onwards
+mdproof --keep-failed-artifacts test-proof.md # Keep failed artifact dirs
+mdproof --print-step-script test-proof.md     # Print failed step script to stderr
+mdproof --print-step-env test-proof.md        # Print failed step env to stderr
 mdproof -u test-proof.md              # Update snapshots
 mdproof --inline README.md            # Test inline code examples
 mdproof --coverage ./tests/           # Coverage analysis (no exec)
@@ -285,6 +288,30 @@ runbooks/fixtures/source-aware-broken.md:7: unclosed code fence
 
 `--report json` includes the same information under `steps[].source` and `steps[].assertions[].source`.
 
+For failed runs, mdproof can also expose the exact debug artifacts:
+
+- `--keep-failed-artifacts` preserves the failed runbook's `artifact_dir`
+- with `--isolation per-runbook`, it also preserves `isolation_dir`
+- `steps[].debug` carries `script_path`, `env_path`, `stdout_path`, `stderr_path`
+- `steps[].debug.environment` captures `PWD`, `HOME`, and `TMPDIR`
+
+Use `--print-step-script` and `--print-step-env` to dump the failed execution unit to `stderr` without corrupting JSON on `stdout`:
+
+```bash
+mdproof --print-step-script --print-step-env --report json failing-proof.md
+mdproof --keep-failed-artifacts --report json failing-proof.md | jq '.artifact_dir, .steps[0].debug'
+```
+
+These can also be set as repo defaults in `mdproof.json`:
+
+```json
+{
+  "keep_failed_artifacts": true,
+  "print_step_script": false,
+  "print_step_env": false
+}
+```
+
 ## CLI Flags
 
 | Flag | Description |
@@ -307,6 +334,9 @@ runbooks/fixtures/source-aware-broken.md:7: unclosed code fence
 | `--coverage` | Coverage report (no execution) |
 | `--coverage-min N` | Minimum coverage score |
 | `--isolation MODE` | `shared` (default) or `per-runbook` (isolated `$HOME`/`$TMPDIR`) |
+| `--keep-failed-artifacts` | Preserve failed artifact dirs for debugging |
+| `--print-step-script` | Print the failed step script to `stderr` |
+| `--print-step-env` | Print the failed step env snapshot to `stderr` |
 | `-step-setup CMD` | Run command before each step (or `step_setup` in config) |
 | `-step-teardown CMD` | Run command after each step (or `step_teardown` in config) |
 | `-v` / `-vv` | Verbose / extra verbose |
@@ -323,7 +353,7 @@ For directives (timeout, retry, depends), hooks, config files, inline testing, s
 4. **Write** steps + assertions. Apply lessons learned (e.g., prefer `jq:` for JSON, explicit `exit_code: 0`)
 5. **Dry-run** first: `mdproof --dry-run my-proof.md`
 6. **Execute**: `mdproof my-proof.md` (with `mdproof sandbox` or `--strict=false`)
-7. **Debug** with `-v -v` if something fails — read source-aware `file:line` output, fix the Markdown or the code under test, re-run
+7. **Debug** with `-v -v`, `--print-step-script`, `--print-step-env`, or `--keep-failed-artifacts` if something fails — read source-aware `file:line` output, inspect `artifact_dir` / `steps[].debug`, fix the Markdown or the code under test, re-run
 8. **Learn** — after execution, record any new discoveries (see Self-Learning below)
 
 ## Self-Learning
@@ -384,3 +414,4 @@ Do NOT improve runbooks speculatively. Only apply lessons that are **confirmed**
 - **`snapshot:` for stable outputs** — use `mdproof -u` to create/update
 - **`--coverage` in CI** — ensure all steps have assertions
 - **Explicit `exit_code: 0`** — better than implicit exit code checking
+- **Use retained artifacts for hard failures** — `--keep-failed-artifacts` plus `steps[].debug` is the fastest way to inspect temp scripts, env snapshots, and captured stderr
