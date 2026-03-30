@@ -10,7 +10,8 @@ description: >-
   exit_code, jq, negation, snapshot), and source-aware failure reporting that
   points to the exact Markdown file and line.
 argument-hint: "[test-description | runbook-path | 'run']"
-targets: [universal, claude, codex]
+metadata: 
+  targets: [universal, claude, codex]
 ---
 
 # mdproof — Executable Runbook Runner
