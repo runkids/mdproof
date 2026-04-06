@@ -44,7 +44,7 @@ type Config struct {
 	Strict              *bool             `json:"strict,omitempty"`                // container-only execution (default: true)
 	Sandbox             *SandboxConfig    `json:"sandbox,omitempty"`               // sandbox subcommand settings
 	Isolation           string            `json:"isolation,omitempty"`             // "shared" (default) | "per-runbook"
-	Workdir             string            `json:"workdir,omitempty"`              // working directory for step execution (supports shell expansion, e.g. $HOME)
+	Workdir             string            `json:"workdir,omitempty"`               // working directory for step execution (supports shell expansion, e.g. $HOME)
 }
 
 // TimeoutDuration parses the timeout string into a time.Duration.
