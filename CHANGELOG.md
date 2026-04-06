@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.8] - 2026-04-06
+
+### New Features
+
+- **Working directory** — `--workdir DIR` sets the working directory for all step execution. Supports shell expansion (e.g., `$HOME`). Also configurable in `mdproof.json` via `workdir`. CLI flag overrides config.
+  ```bash
+  mdproof --workdir /tmp/workspace deploy-proof.md
+  mdproof --workdir '$HOME/project' test-proof.md
+  ```
+  ```json
+  { "workdir": "/tmp/workspace" }
+  ```
+
+### Bug Fixes
+
+- **Working directory not applied** — fixed `runFile()` not threading `Workdir` from `RunOptions` to the executor, which silently ignored `--workdir`
+- **Shell quoting for workdir** — the generated `cd` command now uses double quotes, preventing breakage with paths containing spaces and protecting against shell injection while preserving `$VAR` expansion
+
 ## [0.0.7] - 2026-03-31
 
 ### New Features

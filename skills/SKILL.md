@@ -122,6 +122,7 @@ mdproof --coverage ./tests/           # Coverage analysis (no exec)
 mdproof -step-setup 'rm -rf /tmp/t' test.md  # Run before each step
 mdproof -step-teardown 'cleanup' test.md     # Run after each step
 mdproof --isolation per-runbook ./tests/ # Isolated $HOME/$TMPDIR per runbook
+mdproof --workdir /tmp/workspace tests/ # Run steps in a specific directory
 mdproof sandbox tests/                # Auto-provision container and run
 mdproof sandbox --image node:20 tests/ # Custom image
 mdproof upgrade                       # Self-update
@@ -335,6 +336,7 @@ These can also be set as repo defaults in `mdproof.json`:
 | `--coverage` | Coverage report (no execution) |
 | `--coverage-min N` | Minimum coverage score |
 | `--isolation MODE` | `shared` (default) or `per-runbook` (isolated `$HOME`/`$TMPDIR`) |
+| `--workdir DIR` | Working directory for step execution (supports shell expansion, e.g. `$HOME`) |
 | `--keep-failed-artifacts` | Preserve failed artifact dirs for debugging |
 | `--print-step-script` | Print the failed step script to `stderr` |
 | `--print-step-env` | Print the failed step env snapshot to `stderr` |

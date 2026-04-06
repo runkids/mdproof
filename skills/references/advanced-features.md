@@ -268,6 +268,7 @@ Create `mdproof.json` in the runbook directory:
   "timeout": "5m",
   "strict": false,
   "isolation": "per-runbook",
+  "workdir": "/tmp/workspace",
   "env": {
     "DATABASE_URL": "postgres://localhost:5432/test",
     "LOG_LEVEL": "debug"

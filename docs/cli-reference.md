@@ -28,6 +28,7 @@ When given a directory, mdproof finds files matching `*_runbook.md`, `*-runbook.
 | `--coverage` | Show coverage report (no execution) |
 | `--coverage-min N` | Minimum coverage score (exit 1 if below) |
 | `--isolation MODE` | `shared` (default) or `per-runbook` (isolated `$HOME`/`$TMPDIR`) |
+| `--workdir DIR` | Working directory for step execution (supports shell expansion, e.g. `$HOME`) |
 | `--keep-failed-artifacts` | Preserve failed runbook artifact directories for debugging |
 | `--print-step-script` | Print the failed step script to `stderr` |
 | `--print-step-env` | Print the failed step environment snapshot to `stderr` |
@@ -106,6 +107,9 @@ mdproof -step-setup 'rm -rf /tmp/test-*' -step-teardown 'echo done' deploy-proof
 
 # Per-runbook isolation (fresh $HOME/$TMPDIR per runbook)
 mdproof --isolation per-runbook ./runbooks/
+
+# Run steps in a specific working directory
+mdproof --workdir /tmp/workspace deploy-proof.md
 
 # Retain failed artifacts and show debug paths
 mdproof --keep-failed-artifacts runbooks/fixtures/failing-proof.md

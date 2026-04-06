@@ -115,6 +115,7 @@ Create `mdproof.json` in the runbook directory:
   "timeout": "5m",
   "strict": false,
   "isolation": "per-runbook",
+  "workdir": "/tmp/workspace",
   "env": {
     "LOG_LEVEL": "debug",
     "API_URL": "http://localhost:8080"
@@ -135,6 +136,7 @@ Create `mdproof.json` in the runbook directory:
 | `timeout` | string | Default per-step timeout (e.g. `"2m"`, `"30s"`) |
 | `strict` | boolean | Container-only execution (default: `true`) |
 | `isolation` | string | `"shared"` (default) or `"per-runbook"` |
+| `workdir` | string | Working directory for step execution (supports shell expansion, e.g. `$HOME`) |
 | `env` | object | Environment variables seeded into all steps |
 
 Sandbox settings can also be configured:

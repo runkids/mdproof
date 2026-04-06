@@ -38,6 +38,7 @@ type RunOptions struct {
 	KeepFailedArtifacts bool              // retain failure artifacts for CLI debugging
 	PrintStepScript     bool              // print the failed execution unit script to stderr
 	PrintStepEnv        bool              // print the failed execution unit env snapshot to stderr
+	Workdir             string            // working directory for step execution (shell-expanded)
 }
 
 // shouldRun reports whether stepNum should execute given the filter flags.
@@ -259,6 +260,7 @@ func RunDetailed(r io.Reader, name string, opts RunOptions) (RunResult, error) {
 			RunbookName:  name,
 			StepSetup:    opts.StepSetup,
 			StepTeardown: opts.StepTeardown,
+			Workdir:      opts.Workdir,
 		})
 		allResults := sessionRun.Results
 		artifactDir = sessionRun.ArtifactDir

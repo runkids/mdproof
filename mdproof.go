@@ -153,6 +153,7 @@ func MergeConfig(
 	printStepScriptExplicit bool,
 	cliPrintStepEnv bool,
 	printStepEnvExplicit bool,
+	cliWorkdir string,
 ) Config {
 	return config.Merge(
 		file,
@@ -167,6 +168,7 @@ func MergeConfig(
 		printStepScriptExplicit,
 		cliPrintStepEnv,
 		printStepEnvExplicit,
+		cliWorkdir,
 	)
 }
 

@@ -63,6 +63,7 @@ func main() {
 		showCoverage    bool
 		coverageMin     int
 		strict          bool
+		cliWorkdir      string
 	)
 	flag.StringVar(&stepsFlag, "steps", "", "only run specific steps (comma-separated: 1,3,5)")
 	flag.IntVar(&fromFlag, "from", 0, "run from step N onwards")
@@ -73,6 +74,7 @@ func main() {
 	flag.IntVar(&coverageMin, "coverage-min", 0, "minimum coverage score (exit 1 if below)")
 	flag.BoolVar(&strict, "strict", true, "container-only execution (use --strict=false to allow local)")
 	flag.StringVar(&cliIsolation, "isolation", "", "isolation mode: shared, per-runbook")
+	flag.StringVar(&cliWorkdir, "workdir", "", "working directory for step execution (supports shell expansion, e.g. $HOME)")
 	flag.Parse()
 
 	if !mdproof.ValidIsolation(cliIsolation) {
@@ -229,6 +231,7 @@ func main() {
 		printStepScriptExplicit,
 		printStepEnv,
 		printStepEnvExplicit,
+		cliWorkdir,
 	)
 
 	// Strict mode off → allow local execution.
@@ -321,6 +324,7 @@ func runFile(path, name string, dryRun bool, timeout time.Duration, cfg mdproof.
 		KeepFailedArtifacts: filter.KeepFailedArtifacts,
 		PrintStepScript:     filter.PrintStepScript,
 		PrintStepEnv:        filter.PrintStepEnv,
+		Workdir:             filter.Workdir,
 	})
 }
 
@@ -451,6 +455,7 @@ func buildRunOptions(cfg mdproof.Config, stepNums []int, fromFlag int, failFast 
 		KeepFailedArtifacts: cfg.KeepFailedArtifactsEnabled(),
 		PrintStepScript:     cfg.PrintStepScriptEnabled(),
 		PrintStepEnv:        cfg.PrintStepEnvEnabled(),
+		Workdir:             cfg.Workdir,
 	}
 }
 

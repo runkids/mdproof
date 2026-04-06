@@ -44,6 +44,7 @@ type Config struct {
 	Strict              *bool             `json:"strict,omitempty"`                // container-only execution (default: true)
 	Sandbox             *SandboxConfig    `json:"sandbox,omitempty"`               // sandbox subcommand settings
 	Isolation           string            `json:"isolation,omitempty"`             // "shared" (default) | "per-runbook"
+	Workdir             string            `json:"workdir,omitempty"`              // working directory for step execution (supports shell expansion, e.g. $HOME)
 }
 
 // TimeoutDuration parses the timeout string into a time.Duration.
@@ -97,6 +98,7 @@ func Merge(
 	printStepScriptExplicit bool,
 	cliPrintStepEnv bool,
 	printStepEnvExplicit bool,
+	cliWorkdir string,
 ) Config {
 	merged := file
 	if cliBuild != "" {
@@ -131,6 +133,9 @@ func Merge(
 	}
 	if printStepEnvExplicit {
 		merged.PrintStepEnv = boolPtr(cliPrintStepEnv)
+	}
+	if cliWorkdir != "" {
+		merged.Workdir = cliWorkdir
 	}
 	return merged
 }

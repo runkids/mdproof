@@ -116,6 +116,7 @@ type SessionOptions struct {
 	StepSetup           string // command to run before each step (empty = disabled)
 	StepTeardown        string // command to run after each step (empty = disabled)
 	KeepFailedArtifacts bool
+	Workdir             string // working directory for step execution (shell-expanded at runtime)
 }
 
 // SessionRun carries the parsed results plus the temp artifact dir lifecycle.
@@ -468,6 +469,11 @@ func buildSessionScript(steps []indexedStep, tmpDir string, opts SessionOptions)
 			fmt.Fprintf(&sb, "export %s=%q\n", k, opts.EnvVars[k])
 		}
 		sb.WriteByte('\n')
+	}
+
+	// Change working directory if configured (supports shell expansion).
+	if opts.Workdir != "" {
+		fmt.Fprintf(&sb, "cd \"%s\" || { echo \"mdproof: cannot cd to workdir: %s\" >&2; exit 1; }\n\n", opts.Workdir, opts.Workdir)
 	}
 
 	// Timing helper: works on Linux (date +%s%N) and macOS (date +%s).
