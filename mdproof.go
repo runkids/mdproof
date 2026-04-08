@@ -189,6 +189,11 @@ func WriteJUnitReport(w io.Writer, reports []Report) error {
 	return report.WriteJUnitReport(w, reports)
 }
 
+// WriteGitHubReport writes GitHub Actions workflow commands for failed steps.
+func WriteGitHubReport(w io.Writer, reports []Report) {
+	report.WriteGitHubReport(w, reports)
+}
+
 // WriteSingleReport prints a single runbook result in plain text.
 func WriteSingleReport(w io.Writer, r Report, verbosity int) {
 	report.WriteSingleReport(w, r, verbosity)

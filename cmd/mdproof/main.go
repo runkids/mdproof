@@ -283,6 +283,8 @@ func main() {
 		switch reportFmt {
 		case "junit":
 			mdproof.WriteJUnitReport(outF, reports)
+		case "github":
+			mdproof.WriteGitHubReport(outF, reports)
 		default:
 			if len(reports) == 1 {
 				mdproof.WriteJSONReport(outF, reports[0])
@@ -427,6 +429,8 @@ func runAllAndReport(files []string, dryRun bool, timeout time.Duration, cfg mdp
 
 	if reportFmt == "junit" && len(reports) > 0 {
 		mdproof.WriteJUnitReport(os.Stdout, reports)
+	} else if reportFmt == "github" && len(reports) > 0 {
+		mdproof.WriteGitHubReport(os.Stdout, reports)
 	} else if reportFmt != "json" && len(reports) > 0 {
 		if len(reports) > 1 {
 			mdproof.WritePlainSummary(os.Stdout, reports, verbosity)
