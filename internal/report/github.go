@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/runkids/mdproof/internal/assertion"
 	"github.com/runkids/mdproof/internal/core"
 )
 
@@ -44,7 +45,7 @@ func writeGitHubAnnotation(w io.Writer, s core.StepResult) {
 	}
 
 	// If no assertions but step failed (e.g., non-zero exit code), emit one annotation.
-	if len(s.Assertions) == 0 || allAssertionsPassed(s.Assertions) {
+	if len(s.Assertions) == 0 || assertion.AllPassed(s.Assertions) {
 		reason := core.StepFailReason(s)
 		if reason == "" {
 			reason = "step failed"
@@ -63,13 +64,4 @@ func writeAnnotationLine(w io.Writer, path string, line int, msg string) {
 	} else {
 		fmt.Fprintf(w, "::error ::%s\n", msg)
 	}
-}
-
-func allAssertionsPassed(assertions []core.AssertionResult) bool {
-	for _, a := range assertions {
-		if !a.Matched {
-			return false
-		}
-	}
-	return true
 }
