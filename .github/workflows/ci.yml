@@ -81,6 +81,11 @@ jobs:
             runbooks/fixtures/with-directives-proof.md \
             runbooks/fixtures/verbose-proof.md
 
+      - name: Dogfood — GitHub Actions annotations
+        env:
+          MDPROOF_ALLOW_EXECUTE: "1"
+        run: bin/mdproof --report github runbooks/fixtures/hello-proof.md
+
       - name: Dogfood — snapshot runbook
         env:
           MDPROOF_ALLOW_EXECUTE: "1"
