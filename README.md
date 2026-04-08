@@ -125,6 +125,8 @@ mdproof sandbox api-proof.md     # auto-provisions a container
  2/2 passed  80ms
 ```
 
+> **Tip:** Run `mdproof --help` for the full list of flags and subcommands.
+
 When a check fails, mdproof reports where it came from:
 
 ```text
@@ -181,6 +183,15 @@ When a check fails, mdproof reports where it came from:
 </td>
 </tr>
 </table>
+
+## Prerequisites
+
+| Requirement | Needed for | Install |
+|-------------|-----------|---------|
+| **Docker** | `mdproof sandbox` (container-first execution) | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
+| **jq** *(optional)* | `jq:` assertions | `brew install jq` / `apt install jq` |
+
+> Without Docker you can still run with `--strict=false`, but sandbox mode is recommended for safety.
 
 ## Install
 
@@ -277,6 +288,7 @@ No `Expected:` section → exit code decides (0 = pass).
 | **[Writing Runbooks](docs/writing-runbooks.md)** | Full assertion reference, directives, inline testing, persistent sessions, source tracking |
 | **[CLI Reference](docs/cli-reference.md)** | All flags, subcommands, sandbox mode, usage examples, failure output |
 | **[Advanced Features](docs/advanced.md)** | Hooks, configuration, reports, coverage, CI integration, architecture |
+| **[Troubleshooting](docs/troubleshooting.md)** | Common errors, strict mode, snapshots, jq debugging |
 
 ## AI Agent Skill
 
