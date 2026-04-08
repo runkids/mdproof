@@ -178,6 +178,7 @@ When a check fails, mdproof reports where it came from:
 - Step filtering — `--steps 1,3`, `--from N`, `--fail-fast`
 - Coverage — `--coverage` for CI gating
 - Inline testing — `--inline` validates code examples in any `.md`
+- GitHub Actions annotations — `--report github` for PR inline error markers
 - Zero dependencies — pure Go stdlib, single binary
 
 </td>

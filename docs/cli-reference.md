@@ -14,6 +14,7 @@ When given a directory, mdproof finds files matching `*_runbook.md`, `*-runbook.
 | `--version` | Print version and exit |
 | `--report json` | Output as JSON (single file: object, directory: array) |
 | `--report junit` | Output as JUnit XML |
+| `--report github` | Output as GitHub Actions workflow commands (`::error` annotations) |
 | `--output FILE`, `-o FILE` | Write report to file (format follows `--report`) |
 | `--timeout DURATION` | Per-step timeout (default: 2m) |
 | `--build CMD` | Build hook: run once before all runbooks |
@@ -117,6 +118,9 @@ mdproof --keep-failed-artifacts runbooks/fixtures/failing-proof.md
 # Print failed step script and env to stderr while keeping JSON on stdout
 mdproof --print-step-script --print-step-env --report json runbooks/fixtures/failing-proof.md
 
+# GitHub Actions annotations (inline PR comments)
+mdproof --report github runbooks/
+
 # Update snapshots after intentional changes
 mdproof -u deploy-proof.md
 
@@ -155,3 +159,24 @@ runbooks/fixtures/source-aware-broken.md:7: unclosed code fence
 ```
 
 `--report json` includes the same information under `steps[].source`, `steps[].assertions[].source`, `environment`, `artifact_dir`, `isolation_dir`, and `steps[].debug`.
+
+## GitHub Actions Annotations
+
+`--report github` outputs GitHub Actions [workflow commands](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/workflow-commands-for-github-actions#setting-an-error-message) for failed steps. Each failed assertion becomes an `::error` annotation with file and line number, appearing as inline comments on PR diffs.
+
+```bash
+mdproof --report github runbooks/
+```
+
+```
+::error file=runbooks/api-proof.md,line=12::Step 1 (Health check): expected output (not found in stdout)
+::error file=runbooks/api-proof.md,line=18::Step 2 (Create item): jq: .id != null (jq failed: null)
+```
+
+**Tip:** Combine with JUnit XML for both annotations and test summary:
+
+```yaml
+# .github/workflows/ci.yml
+- run: mdproof --report github runbooks/
+- run: mdproof --report junit -o results.xml runbooks/
+```
