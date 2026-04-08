@@ -504,4 +504,10 @@ Expected:
   env:
     MDPROOF_ALLOW_EXECUTE: "1"
   run: mdproof --report junit --fail-fast -o results.xml ./tests/
+
+# GitHub Actions — inline PR annotations
+- name: Run mdproof with annotations
+  env:
+    MDPROOF_ALLOW_EXECUTE: "1"
+  run: mdproof --report github ./tests/
 ```

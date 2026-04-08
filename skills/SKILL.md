@@ -110,6 +110,7 @@ mdproof -v -v test-proof.md           # Extra verbose (show output)
 mdproof -o results.json test-proof.md # JSON report to file
 mdproof --report json test-proof.md   # JSON report to stdout
 mdproof --report junit test-proof.md  # JUnit XML report to stdout
+mdproof --report github test-proof.md # GitHub Actions annotations
 mdproof --fail-fast ./tests/          # Stop on first failure
 mdproof --steps 1,3 test-proof.md     # Run specific steps
 mdproof --from 3 test-proof.md        # Run from step 3 onwards
@@ -322,6 +323,7 @@ These can also be set as repo defaults in `mdproof.json`:
 | `--version` | Print version |
 | `--report json` | JSON output to stdout |
 | `--report junit` | JUnit XML output to stdout |
+| `--report github` | GitHub Actions `::error` annotations to stdout |
 | `-o FILE` | Write report to file (format follows `--report`) |
 | `--timeout DURATION` | Per-step timeout (default: 2m) |
 | `--build CMD` | Run once before all runbooks |

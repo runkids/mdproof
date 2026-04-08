@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.0.9] - 2026-04-08
+
+### New Features
+
+- **GitHub Actions annotations** — `--report github` outputs `::error` workflow commands with file and line numbers. Failed assertions appear as inline annotations on PR diffs, pointing to the exact Markdown line that broke.
+  ```bash
+  mdproof --report github runbooks/
+  ```
+  ```
+  ::error file=runbooks/api-proof.md,line=12::Step 1 (Health check): expected output (not found in stdout)
+  ```
+  Combine with JUnit XML for both annotations and test summary:
+  ```yaml
+  - run: mdproof --report github runbooks/
+  - run: mdproof --report junit -o results.xml runbooks/
+  ```
+
+### Documentation
+
+- **Prerequisites section** — README now lists system requirements (Docker for sandbox, jq for jq assertions) before install instructions
+- **Troubleshooting guide** — new `docs/troubleshooting.md` covers strict mode errors, jq setup, snapshot mismatches, timeouts, and common CLI issues
+- **CLI discoverability** — `mdproof --help` tip added to Quick Start section
+
 ## [0.0.8] - 2026-04-06
 
 ### New Features

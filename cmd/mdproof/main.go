@@ -38,7 +38,7 @@ func main() {
 		verbose             countFlag
 	)
 
-	flag.StringVar(&reportFmt, "report", "", "output format: json, junit")
+	flag.StringVar(&reportFmt, "report", "", "output format: json, junit, github")
 	flag.BoolVar(&dryRun, "dry-run", false, "parse and classify only, don't execute")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.DurationVar(&timeout, "timeout", 0, "per-step timeout (default: 2m, or from mdproof.json)")
